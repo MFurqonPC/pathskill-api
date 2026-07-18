@@ -12,6 +12,10 @@ class DatabaseSeeder extends Seeder
             CareerSeeder::class,
             LearningPathSeeder::class,
             SelfAssessmentContentSeeder::class,
+            AssignmentDetailSeeder::class,
+            QuizSeeder::class,
+            CodingExerciseSeeder::class,
+            MiniProjectSeeder::class,
         ]);
     }
 }

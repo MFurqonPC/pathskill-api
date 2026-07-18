@@ -5,7 +5,11 @@ use App\Http\Controllers\Api\CareerController;
 use App\Http\Controllers\Api\ContactMessageController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\LearningPathController;
+use App\Http\Controllers\Api\AssignmentController;
+use App\Http\Controllers\Api\CodingExerciseController;
+use App\Http\Controllers\Api\MiniProjectController;
 use App\Http\Controllers\Api\ProgressController;
+use App\Http\Controllers\Api\QuizController;
 use App\Http\Controllers\Api\SelfAssessmentController;
 use App\Http\Controllers\Api\SkillAssessmentController;
 use App\Http\Controllers\Api\SkillMapController;
@@ -54,5 +58,16 @@ Route::middleware('auth:sanctum')->group(function () {
 
     // Progress
     Route::post('/lessons/{lesson}/complete', [ProgressController::class, 'completeLesson']);
+    // route baru
+    Route::get('/assignments/{assignment}', [AssignmentController::class, 'show']);
+    // route lama tetap
     Route::post('/assignments/{assignment}/submit', [ProgressController::class, 'submitAssignment']);
+
+    Route::get('/assignments/{assignment}/quiz', [QuizController::class, 'show']);
+    Route::post('/quiz-questions/{question}/answer', [QuizController::class, 'answer']);
+
+    Route::get('/assignments/{assignment}/coding-exercise', [CodingExerciseController::class, 'show']);
+    Route::post('/coding-exercises/{codingExercise}/submit', [CodingExerciseController::class, 'submit']);
+
+    Route::get('/assignments/{assignment}/mini-project', [MiniProjectController::class, 'show']);
 });
