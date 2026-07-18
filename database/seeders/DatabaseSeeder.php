@@ -11,6 +11,7 @@ class DatabaseSeeder extends Seeder
         $this->call([
             CareerSeeder::class,
             LearningPathSeeder::class,
+            SelfAssessmentContentSeeder::class,
         ]);
     }
 }

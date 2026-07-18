@@ -6,6 +6,7 @@ use App\Http\Controllers\Api\ContactMessageController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\LearningPathController;
 use App\Http\Controllers\Api\ProgressController;
+use App\Http\Controllers\Api\SelfAssessmentController;
 use App\Http\Controllers\Api\SkillAssessmentController;
 use App\Http\Controllers\Api\SkillMapController;
 use Illuminate\Support\Facades\Route;
@@ -28,6 +29,17 @@ Route::middleware('auth:sanctum')->group(function () {
     // Skill Assessment
     Route::post('/skill-assessments', [SkillAssessmentController::class, 'store']);
     Route::get('/skill-assessments/{careerId}', [SkillAssessmentController::class, 'show']);
+
+    // Self-Assessment Step 2 (Experience Checklist + Scenario Confidence + Short Verification Task)
+    Route::get('/careers/{career}/self-assessment', [SelfAssessmentController::class, 'step2Content']);
+    Route::post('/self-assessment/checklist', [SelfAssessmentController::class, 'saveChecklist']);
+    Route::post('/self-assessment/confidence', [SelfAssessmentController::class, 'saveConfidence']);
+
+    // Self-Assessment Step 3 (Skill Verification Quiz)
+    Route::get('/careers/{career}/verification-quiz', [SelfAssessmentController::class, 'quizQuestions']);
+    Route::post('/verification-quiz/{question}/answer', [SelfAssessmentController::class, 'answerQuizQuestion']);
+    Route::get('/careers/{career}/verification-quiz/result', [SelfAssessmentController::class, 'quizResult']);
+    Route::post('/careers/{career}/verification-quiz/log-tab-switch', [SelfAssessmentController::class, 'logTabSwitch']);
 
     // Skill Map (radar chart + gap analysis)
     Route::get('/skill-map', [SkillMapController::class, 'index']);
