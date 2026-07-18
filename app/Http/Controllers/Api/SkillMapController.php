@@ -4,7 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Career;
-use App\Models\UserQuizAnswer;
+use App\Models\UserVerificationAnswer;
 use App\Models\UserScenarioConfidence;
 use App\Models\VerificationQuizQuestion;
 use Illuminate\Http\JsonResponse;
@@ -70,7 +70,7 @@ class SkillMapController extends Controller
             ->where('is_warmup', false)
             ->pluck('id');
 
-        $quizAnswers = UserQuizAnswer::where('user_id', $user->id)
+        $quizAnswers = UserVerificationAnswer::where('user_id', $user->id)
             ->whereIn('verification_quiz_question_id', $quizQuestionIds)
             ->get();
 

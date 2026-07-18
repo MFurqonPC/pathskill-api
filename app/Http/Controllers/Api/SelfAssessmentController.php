@@ -7,7 +7,7 @@ use App\Models\Career;
 use App\Models\ExperienceChecklistItem;
 use App\Models\ScenarioConfidenceItem;
 use App\Models\UserExperienceChecklist;
-use App\Models\UserQuizAnswer;
+use App\Models\UserVerificationAnswer;
 use App\Models\UserScenarioConfidence;
 use App\Models\VerificationQuizQuestion;
 use App\Models\VerificationQuizAttempt;
@@ -68,7 +68,7 @@ class SelfAssessmentController extends Controller
             );
 
             if ($warmupAttempt->isCompleted()) {
-                $userAnswer = UserQuizAnswer::where('user_id', $userId)
+                $userAnswer = UserVerificationAnswer::where('user_id', $userId)
                     ->where('verification_quiz_question_id', $warmupQuestion->id)
                     ->first();
 
@@ -206,7 +206,7 @@ class SelfAssessmentController extends Controller
 
         $isCorrect = $validated['selected_option_index'] === $question->correct_option_index;
 
-        UserQuizAnswer::updateOrCreate(
+        UserVerificationAnswer::updateOrCreate(
             ['user_id' => $userId, 'verification_quiz_question_id' => $question->id],
             [
                 'selected_option_index' => $validated['selected_option_index'],
@@ -242,7 +242,7 @@ class SelfAssessmentController extends Controller
             ->pluck('id');
 
         $totalQuestions = $questionIds->count();
-        $answers = UserQuizAnswer::where('user_id', $userId)
+        $answers = UserVerificationAnswer::where('user_id', $userId)
             ->whereIn('verification_quiz_question_id', $questionIds)
             ->get();
 
