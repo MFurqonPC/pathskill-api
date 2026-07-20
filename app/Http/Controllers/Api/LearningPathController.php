@@ -148,9 +148,7 @@ class LearningPathController extends Controller
      */
     public function show(Request $request, LearningModule $module): JsonResponse
 {
-    dd($request->user());
-
-    $user = $request->user();
+   $user = $request->user();
         $module->load([
             'lessons.userProgress' => fn ($q) => $q->where('user_id', $user->id),
             'assignments.userProgress' => fn ($q) => $q->where('user_id', $user->id),
