@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\LearningModule;
+use App\Models\UserModuleProgress;
 use App\Services\GroqService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -17,12 +18,11 @@ class LearningPathController extends Controller
     }
 
     /**
-     * POST /api/learning-path/generate
-     * Generate modul belajar pakai AI (Groq) berdasarkan skill gap user.
-     * Kalau modul untuk career ini SUDAH ada (misal sudah pernah digenerate
-     * user lain / sudah di-seed), langsung dipakai ulang — tidak generate dobel.
+     * POST /api/learning-path/recommend
+     * Minta Groq merekomendasikan URUTAN modul yang sudah ada (manual/seeder)
+     * berdasarkan skill gap user. TIDAK membuat modul/lesson/assignment baru.
      */
-    public function generate(Request $request): JsonResponse
+    public function recommend(Request $request): JsonResponse
     {
         $user = $request->user();
 
@@ -32,15 +32,26 @@ class LearningPathController extends Controller
 
         $career = $user->careerGoal;
 
-        $existingModules = LearningModule::where('career_id', $career->id)->exists();
-        if ($existingModules) {
+        $modules = LearningModule::where('career_id', $career->id)->get(['id', 'title', 'description']);
+
+        if ($modules->isEmpty()) {
             return response()->json([
-                'message' => 'Learning path untuk career ini sudah tersedia.',
-                'generated' => false,
+                'message' => 'Modul untuk career ini belum tersedia. Hubungi admin untuk menambahkan modul.',
+            ], 422);
+        }
+
+        $alreadyRecommended = UserModuleProgress::where('user_id', $user->id)
+            ->whereIn('learning_module_id', $modules->pluck('id'))
+            ->whereNotNull('recommended_order')
+            ->exists();
+
+        if ($alreadyRecommended) {
+            return response()->json([
+                'message' => 'Urutan learning path untuk kamu sudah pernah direkomendasikan.',
+                'recommended' => false,
             ]);
         }
 
-        // ambil skill gap dari hasil skill assessment user
         $skillGaps = $career->skills()
             ->with(['assessments' => fn ($q) => $q->where('user_id', $user->id)])
             ->get()
@@ -58,46 +69,23 @@ class LearningPathController extends Controller
         }
 
         try {
-            $result = $this->groq->generateLearningPath($career, $skillGaps);
+            $result = $this->groq->recommendModuleOrder($career, $skillGaps, $modules->toArray());
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 502);
         }
 
-        DB::transaction(function () use ($result, $career) {
-            foreach ($result['modules'] as $order => $moduleData) {
-                $module = LearningModule::create([
-                    'career_id' => $career->id,
-                    'title' => $moduleData['title'],
-                    'description' => $moduleData['description'] ?? null,
-                    'order' => $order + 1,
-                    'total_lessons' => count($moduleData['lessons']),
-                    'total_assignments' => count($moduleData['assignments']),
-                    'ai_generated' => true,
-                ]);
-
-                foreach ($moduleData['lessons'] as $i => $title) {
-                    $module->lessons()->create([
-                        'title' => 'Lesson ' . ($i + 1) . ": {$title}",
-                        'type' => 'video',
-                        'duration_minutes' => 15,
-                        'order' => $i + 1,
-                    ]);
-                }
-
-                foreach ($moduleData['assignments'] as $i => $title) {
-                    $module->assignments()->create([
-                        'title' => 'Assignment ' . ($i + 1) . ": {$title}",
-                        'description' => "Complete a practical {$moduleData['title']} project",
-                        'due_date' => now()->addWeeks(($order * 2) + $i + 1),
-                        'order' => $i + 1,
-                    ]);
-                }
+        DB::transaction(function () use ($result, $user) {
+            foreach ($result['order'] as $i => $item) {
+                UserModuleProgress::updateOrCreate(
+                    ['user_id' => $user->id, 'learning_module_id' => $item['module_id']],
+                    ['recommended_order' => $i + 1, 'recommended_reason' => $item['reason']]
+                );
             }
         });
 
         return response()->json([
-            'message' => 'Learning path berhasil digenerate.',
-            'generated' => true,
+            'message' => 'Urutan learning path berhasil direkomendasikan.',
+            'recommended' => true,
         ], 201);
     }
 
@@ -115,9 +103,10 @@ class LearningPathController extends Controller
         }
 
         $modules = LearningModule::where('career_id', $user->career_goal_id)
-            ->orderBy('order')
             ->with(['assignments', 'userProgress' => fn ($q) => $q->where('user_id', $user->id)])
-            ->get();
+            ->get()
+            ->sortBy(fn ($m) => $m->userProgress->first()?->recommended_order ?? $m->order)
+            ->values();
 
         $totalModules = $modules->count();
         $completedModules = $modules->filter(
@@ -158,9 +147,10 @@ class LearningPathController extends Controller
      * (dipakai di halaman "Advanced React Patterns" detail).
      */
     public function show(Request $request, LearningModule $module): JsonResponse
-    {
-        $user = $request->user();
+{
+    dd($request->user());
 
+    $user = $request->user();
         $module->load([
             'lessons.userProgress' => fn ($q) => $q->where('user_id', $user->id),
             'assignments.userProgress' => fn ($q) => $q->where('user_id', $user->id),
@@ -177,6 +167,9 @@ class LearningPathController extends Controller
                 'title' => $l->title,
                 'type' => $l->type,
                 'duration_minutes' => $l->duration_minutes,
+                'explanation' => $l->explanation,
+                'example' => $l->example,
+                'function_context' => $l->function_context,
                 'completed' => $l->userProgress->first()?->completed ?? false,
             ]),
             'assignments' => $module->assignments->map(fn ($a) => [

@@ -11,7 +11,16 @@ class Lesson extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['learning_module_id', 'title', 'type', 'duration_minutes', 'order'];
+    protected $fillable = [
+    'learning_module_id',
+    'title',
+    'type',
+    'duration_minutes',
+    'order',
+    'explanation',
+    'example',
+    'function_context',
+    ];
 
     public function module(): BelongsTo
     {

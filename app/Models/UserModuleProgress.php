@@ -10,7 +10,7 @@ class UserModuleProgress extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['user_id', 'learning_module_id', 'status', 'percentage'];
+    protected $fillable = ['user_id', 'learning_module_id', 'status', 'percentage', 'recommended_order', 'recommended_reason'];
 
     public function user(): BelongsTo
     {
