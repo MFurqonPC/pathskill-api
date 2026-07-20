@@ -36,4 +36,8 @@ class Assignment extends Model
     {
         return $this->hasOne(CodingExercise::class);
     }
+    public function miniProject(): HasOne
+    {
+        return $this->hasOne(MiniProject::class);
+    }
 }

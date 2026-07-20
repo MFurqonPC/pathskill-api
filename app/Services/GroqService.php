@@ -24,31 +24,37 @@ class GroqService
     }
 
     /**
-     * Generate learning path (modul + lesson + assignment) berdasarkan
-     * career tujuan dan skill gap user (hasil dari Skill Assessment).
+     * Rekomendasikan URUTAN modul yang SUDAH ADA (dibuat manual/seeder),
+     * berdasarkan skill gap user. Groq TIDAK membuat modul/lesson/assignment
+     * baru — cuma mengurutkan ulang ID modul yang dikirim, plus kasih alasan.
      *
      * @param Career $career
      * @param array $skillGaps [['skill_name' => 'React', 'current' => 2, 'required' => 4.5], ...]
-     * @return array{modules: array} — sudah divalidasi strukturnya, siap disimpan ke DB
+     * @param array $availableModules [['id' => 3, 'title' => '...', 'description' => '...'], ...]
+     * @return array{order: array} — [['module_id' => int, 'reason' => string], ...]
      */
-    public function generateLearningPath(Career $career, array $skillGaps): array
+    public function recommendModuleOrder(Career $career, array $skillGaps, array $availableModules): array
     {
         if (empty($this->apiKey)) {
             throw new RuntimeException('GROQ_API_KEY belum diset di .env');
         }
 
-        $prompt = $this->buildPrompt($career, $skillGaps);
+        if (empty($availableModules)) {
+            throw new RuntimeException('Belum ada modul yang di-seed untuk career ini.');
+        }
+
+        $prompt = $this->buildPrompt($career, $skillGaps, $availableModules);
 
         $response = Http::withToken($this->apiKey)
             ->timeout(60)
             ->post($this->baseUrl, [
                 'model' => $this->model,
-                'temperature' => 0.4,
+                'temperature' => 0.3,
                 'response_format' => ['type' => 'json_object'],
                 'messages' => [
                     [
                         'role' => 'system',
-                        'content' => 'Kamu adalah AI career coach yang menyusun learning path terstruktur untuk IT learner Indonesia. Balas HANYA dengan JSON valid, tanpa teks tambahan.',
+                        'content' => 'Kamu adalah AI career coach yang mengurutkan modul belajar yang SUDAH TERSEDIA berdasarkan prioritas skill gap. Kamu TIDAK BOLEH membuat modul baru, mengubah judul, atau menambah module_id yang tidak ada di daftar yang diberikan. Balas HANYA dengan JSON valid, tanpa teks tambahan.',
                     ],
                     ['role' => 'user', 'content' => $prompt],
                 ],
@@ -56,7 +62,7 @@ class GroqService
 
         if ($response->failed()) {
             Log::error('Groq API error', ['body' => $response->body()]);
-            throw new RuntimeException('Gagal generate learning path dari Groq: ' . $response->status());
+            throw new RuntimeException('Gagal mengambil rekomendasi urutan dari Groq: ' . $response->status());
         }
 
         $content = $response->json('choices.0.message.content');
@@ -67,17 +73,21 @@ class GroqService
 
         $decoded = json_decode($content, true);
 
-        if (! is_array($decoded) || ! isset($decoded['modules'])) {
+        if (! is_array($decoded) || ! isset($decoded['order'])) {
             throw new RuntimeException('Format respons Groq tidak sesuai ekspektasi.');
         }
 
-        return $this->validateStructure($decoded);
+        return $this->validateStructure($decoded, $availableModules);
     }
 
-    private function buildPrompt(Career $career, array $skillGaps): string
+    private function buildPrompt(Career $career, array $skillGaps, array $availableModules): string
     {
         $gapLines = collect($skillGaps)
             ->map(fn ($g) => "- {$g['skill_name']}: current {$g['current']}/5, industry butuh {$g['required']}/5")
+            ->implode("\n");
+
+        $moduleLines = collect($availableModules)
+            ->map(fn ($m) => "- id={$m['id']} | {$m['title']}: {$m['description']}")
             ->implode("\n");
 
         return <<<PROMPT
@@ -86,46 +96,58 @@ Career tujuan: {$career->name}
 Skill gap user saat ini:
 {$gapLines}
 
-Buatkan learning path terstruktur (4-6 modul) untuk menutup skill gap di atas,
-prioritaskan modul yang menutup gap terbesar dulu. Setiap modul harus punya:
-- title (singkat, jelas)
-- description (1 kalimat)
-- lessons: array of string (judul lesson, 6-12 per modul)
-- assignments: array of string (judul assignment praktis, 3-5 per modul)
+Daftar modul yang SUDAH TERSEDIA (JANGAN buat modul baru, JANGAN ubah judul,
+JANGAN pakai id di luar daftar ini):
+{$moduleLines}
+
+Tugas kamu HANYA mengurutkan ulang id modul di atas berdasarkan prioritas —
+modul yang menutup skill gap TERBESAR ditaruh paling awal. Sertakan semua
+module_id yang ada di daftar (jangan ada yang terlewat), dan kasih alasan
+singkat (1 kalimat) kenapa modul itu diprioritaskan di urutan tersebut.
 
 Balas dalam format JSON PERSIS seperti ini (tanpa markdown, tanpa penjelasan tambahan):
 {
-  "modules": [
-    {
-      "title": "string",
-      "description": "string",
-      "lessons": ["string", "string"],
-      "assignments": ["string", "string"]
-    }
+  "order": [
+    { "module_id": 3, "reason": "string singkat" },
+    { "module_id": 1, "reason": "string singkat" }
   ]
 }
 PROMPT;
     }
 
     /**
-     * Validasi minimal supaya data dari AI tidak merusak database
-     * kalau formatnya sedikit meleset (misal field kosong / bukan array).
+     * Validasi KETAT: setiap module_id yang dikembalikan Groq WAJIB ada
+     * di daftar $availableModules yang kita kirim (whitelist check).
+     * Ini mencegah AI "mengarang" module_id yang tidak ada di database.
      */
-    private function validateStructure(array $decoded): array
+    private function validateStructure(array $decoded, array $availableModules): array
     {
-        $modules = array_filter($decoded['modules'], function ($m) {
-            return is_array($m)
-                && ! empty($m['title'])
-                && ! empty($m['lessons'])
-                && is_array($m['lessons'])
-                && ! empty($m['assignments'])
-                && is_array($m['assignments']);
-        });
+        $validIds = collect($availableModules)->pluck('id')->all();
 
-        if (empty($modules)) {
-            throw new RuntimeException('Groq tidak mengembalikan modul yang valid.');
+        $order = collect($decoded['order'] ?? [])
+            ->filter(function ($item) use ($validIds) {
+                return is_array($item)
+                    && isset($item['module_id'])
+                    && in_array($item['module_id'], $validIds, true);
+            })
+            ->map(fn ($item) => [
+                'module_id' => (int) $item['module_id'],
+                'reason' => (string) ($item['reason'] ?? ''),
+            ])
+            ->values();
+
+        if ($order->isEmpty()) {
+            throw new RuntimeException('Groq tidak mengembalikan urutan modul yang valid (semua module_id ditolak whitelist).');
         }
 
-        return ['modules' => array_values($modules)];
+        // Jaga-jaga: kalau Groq gak nyebutin semua modul yang dikirim,
+        // sisanya ditambahkan di akhir urutan (fallback, bukan dihilangkan).
+        $mentionedIds = $order->pluck('module_id')->all();
+        $missing = array_diff($validIds, $mentionedIds);
+        foreach ($missing as $missingId) {
+            $order->push(['module_id' => $missingId, 'reason' => 'Urutan default (tidak disebutkan AI)']);
+        }
+
+        return ['order' => $order->all()];
     }
 }

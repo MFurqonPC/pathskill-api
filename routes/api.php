@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\LearningPathController;
 use App\Http\Controllers\Api\AssignmentController;
 use App\Http\Controllers\Api\CodingExerciseController;
+use App\Http\Controllers\Api\MiniProjectController;
 use App\Http\Controllers\Api\ProgressController;
 use App\Http\Controllers\Api\QuizController;
 use App\Http\Controllers\Api\SkillAssessmentController;
@@ -55,4 +56,6 @@ Route::middleware('auth:sanctum')->group(function () {
 
     Route::get('/assignments/{assignment}/coding-exercise', [CodingExerciseController::class, 'show']);
     Route::post('/coding-exercises/{codingExercise}/submit', [CodingExerciseController::class, 'submit']);
+
+    Route::get('/assignments/{assignment}/mini-project', [MiniProjectController::class, 'show']);
 });

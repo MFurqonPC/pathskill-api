@@ -35,6 +35,15 @@ class CodingExerciseSeeder extends Seeder
                     'Gunakan CSS Grid/Flexbox agar kolom otomatis menyesuaikan lebar layar',
                     'Tambahkan atribut alt pada setiap <img>',
                 ],
+                // Checklist self-check manual, BUKAN hasil auto-run — belum ada
+                // execution engine, jadi ini cuma panduan buat user ngecek
+                // kodenya sendiri sebelum submit ke mentor.
+                'test_cases' => [
+                    'Navigasi utama sudah pakai <nav>, bukan lagi <div class="hero-nav">',
+                    'Section hero dibungkus <header>, bukan <div class="hero">',
+                    'Layout tetap rapi kalau lebar browser diperkecil ke ukuran HP',
+                    'Setiap <img> punya atribut alt yang mendeskripsikan gambarnya',
+                ],
                 'language' => 'html',
                 'starter_code' => <<<'CODE'
 <!-- Lengkapi section hero di bawah ini -->

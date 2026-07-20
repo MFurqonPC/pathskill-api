@@ -17,6 +17,7 @@ class CodingExercise extends Model
         'description',
         'learning_objectives',
         'requirements',
+        'test_cases',
         'language',
         'starter_code',
         'hint',
@@ -25,6 +26,7 @@ class CodingExercise extends Model
     protected $casts = [
         'learning_objectives' => 'array',
         'requirements' => 'array',
+        'test_cases' => 'array',
     ];
 
     public function assignment(): BelongsTo

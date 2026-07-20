@@ -129,7 +129,12 @@ class QuizSeeder extends Seeder
                 'order' => $index + 1,
             ]);
 
-            foreach ($q['options'] as $optIndex => $opt) {
+            // acak urutan opsi supaya jawaban benar gak selalu di posisi
+            // pertama — flag 'correct' ikut option-nya, jadi tetap valid.
+            $options = $q['options'];
+            shuffle($options);
+
+            foreach ($options as $optIndex => $opt) {
                 $question->options()->create([
                     'option_text' => $opt['text'],
                     'is_correct' => $opt['correct'],

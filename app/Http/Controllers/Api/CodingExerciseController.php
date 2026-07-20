@@ -37,6 +37,7 @@ class CodingExerciseController extends Controller
             'description' => $exercise->description,
             'learning_objectives' => $exercise->learning_objectives ?? [],
             'requirements' => $exercise->requirements ?? [],
+            'test_cases' => $exercise->test_cases ?? [],
             'language' => $exercise->language,
             'starter_code' => $exercise->starter_code,
             'hint' => $exercise->hint,

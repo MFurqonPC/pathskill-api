@@ -21,11 +21,13 @@ class AssignmentController extends Controller
             'userProgress' => fn ($q) => $q->where('user_id', $user->id),
             'quiz.questions',
             'codingExercise',
+            'miniProject',
         ]);
 
         $progress = $assignment->userProgress->first();
         $quiz = $assignment->quiz;
         $codingExercise = $assignment->codingExercise;
+        $miniProject = $assignment->miniProject;
 
         $quizCompleted = false;
         if ($quiz && $quiz->questions->isNotEmpty()) {
@@ -58,6 +60,10 @@ class AssignmentController extends Controller
             'quiz_completed' => $quizCompleted,
             'has_coding_exercise' => (bool) $codingExercise,
             'coding_exercise_completed' => $codingExerciseCompleted,
+            // Mini Project tidak punya submission tersendiri — brief-nya cuma
+            // dibaca sekali sebelum Pengumpulan, jadi statusnya "selesai" ikut
+            // status pengumpulan tugas (submitted/successful), bukan flag terpisah.
+            'has_mini_project' => (bool) $miniProject,
             'status' => $progress?->status ?? 'pending',
             'file_name' => $progress?->file_name,
             'file_url' => $progress?->file_path

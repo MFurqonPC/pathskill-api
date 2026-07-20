@@ -14,6 +14,7 @@ class DatabaseSeeder extends Seeder
             AssignmentDetailSeeder::class,
             QuizSeeder::class,
             CodingExerciseSeeder::class,
+            MiniProjectSeeder::class,
         ]);
     }
 }
