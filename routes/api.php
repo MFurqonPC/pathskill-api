@@ -52,7 +52,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index']);
 
     // Learning Path (AI-generated via Groq)
-    Route::post('/learning-path/generate', [LearningPathController::class, 'generate']);
+    Route::post('/learning-path/generate', [LearningPathController::class, 'recommend']);
     Route::get('/learning-path', [LearningPathController::class, 'index']);
     Route::get('/learning-path/{module}', [LearningPathController::class, 'show']);
 
