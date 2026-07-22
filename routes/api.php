@@ -43,7 +43,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/learning-path/generate', [LearningPathController::class, 'generate']);
     Route::get('/learning-path', [LearningPathController::class, 'index']);
     Route::get('/learning-path/{module}', [LearningPathController::class, 'show']);
-
+    Route::post('/learning-path/generate', [LearningPathController::class, 'recommend']);
     // Progress
     Route::post('/lessons/{lesson}/complete', [ProgressController::class, 'completeLesson']);
     // route baru
