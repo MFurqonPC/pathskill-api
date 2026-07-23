@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\CodingExerciseController;
 use App\Http\Controllers\Api\MiniProjectController;
 use App\Http\Controllers\Api\ProgressController;
 use App\Http\Controllers\Api\QuizController;
+use App\Http\Controllers\Api\SelfAssessmentController;
 use App\Http\Controllers\Api\SkillAssessmentController;
 use App\Http\Controllers\Api\SkillMapController;
 use Illuminate\Support\Facades\Route;
@@ -33,6 +34,17 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/skill-assessments', [SkillAssessmentController::class, 'store']);
     Route::get('/skill-assessments/{careerId}', [SkillAssessmentController::class, 'show']);
 
+    // Self-Assessment Step 2 (Experience Checklist + Scenario Confidence + Short Verification Task)
+    Route::get('/careers/{career}/self-assessment', [SelfAssessmentController::class, 'step2Content']);
+    Route::post('/self-assessment/checklist', [SelfAssessmentController::class, 'saveChecklist']);
+    Route::post('/self-assessment/confidence', [SelfAssessmentController::class, 'saveConfidence']);
+
+    // Self-Assessment Step 3 (Skill Verification Quiz)
+    Route::get('/careers/{career}/verification-quiz', [SelfAssessmentController::class, 'quizQuestions']);
+    Route::post('/verification-quiz/{question}/answer', [SelfAssessmentController::class, 'answerQuizQuestion']);
+    Route::get('/careers/{career}/verification-quiz/result', [SelfAssessmentController::class, 'quizResult']);
+    Route::post('/careers/{career}/verification-quiz/log-tab-switch', [SelfAssessmentController::class, 'logTabSwitch']);
+
     // Skill Map (radar chart + gap analysis)
     Route::get('/skill-map', [SkillMapController::class, 'index']);
 
@@ -40,7 +52,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::get('/dashboard', [DashboardController::class, 'index']);
 
     // Learning Path (AI-generated via Groq)
-    Route::post('/learning-path/generate', [LearningPathController::class, 'generate']);
+    Route::post('/learning-path/generate', [LearningPathController::class, 'recommend']);
     Route::get('/learning-path', [LearningPathController::class, 'index']);
     Route::get('/learning-path/{module}', [LearningPathController::class, 'show']);
     Route::post('/learning-path/generate', [LearningPathController::class, 'recommend']);
