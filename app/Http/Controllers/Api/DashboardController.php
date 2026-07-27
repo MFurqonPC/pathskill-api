@@ -19,8 +19,24 @@ class DashboardController extends Controller
         $user = $request->user();
 
         if (! $user->career_goal_id) {
+            // `reason` dipakai frontend untuk menentukan CTA (Lengkapi Profil)
+            // tanpa mencocokkan teks `message`.
             return response()->json([
                 'message' => 'User belum memilih career goal.',
+                'reason' => 'no_career_goal',
+            ], 422);
+        }
+
+        // Gate: assessment 3-tahap (rating + checklist + quiz) harus lunas
+        // dulu. Pakai `assessment_completed_at` sebagai satu-satunya sumber
+        // kebenaran (di-set oleh SelfAssessmentController::quizResult() saat
+        // ketiga tahap lengkap), konsisten dengan SkillMapController &
+        // LearningPathController.
+        if (! $user->assessment_completed_at) {
+            return response()->json([
+                'message' => 'Selesaikan Skill Assessment terlebih dahulu.',
+                'reason' => 'not_assessed',
+                'career_goal_id' => $user->career_goal_id,
             ], 422);
         }
 
@@ -57,6 +73,10 @@ class DashboardController extends Controller
                 }
                 $allAssignments[] = [
                     'id' => $assignment->id,
+                    // Dibutuhkan frontend untuk membentuk link
+                    // /learning-path/{module_id}/assignments/{id} di kartu
+                    // "Tugas yang Perlu Diselesaikan" pada dashboard.
+                    'module_id' => $module->id,
                     'title' => $assignment->title,
                     'module_title' => $module->title,
                     'due_date' => $assignment->due_date,

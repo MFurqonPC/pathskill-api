@@ -10,10 +10,15 @@ class ScenarioConfidenceItem extends Model
 {
     use HasFactory;
 
-    protected $fillable = ['career_id', 'scenario_text', 'order'];
+    protected $fillable = ['career_id', 'skill_id', 'scenario_text', 'order'];
 
     public function career(): BelongsTo
     {
         return $this->belongsTo(Career::class);
+    }
+
+    public function skill(): BelongsTo
+    {
+        return $this->belongsTo(CareerSkill::class, 'skill_id');
     }
 }

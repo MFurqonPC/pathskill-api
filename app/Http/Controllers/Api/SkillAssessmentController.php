@@ -6,6 +6,7 @@ use App\Http\Controllers\Controller;
 use App\Http\Requests\StoreSkillAssessmentRequest;
 use App\Models\CareerSkill;
 use App\Models\UserSkillAssessment;
+use App\Services\SkillRecommendationCacheService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Support\Facades\DB;
 
@@ -34,6 +35,10 @@ class SkillAssessmentController extends Controller
                 );
             }
         });
+
+        // rating berubah → rekomendasi skill map yang di-cache sudah tidak relevan
+        app(SkillRecommendationCacheService::class)
+            ->invalidate($userId, $request->user()->career_goal_id);
 
         return response()->json([
             'message' => 'Skill assessment berhasil disimpan.',

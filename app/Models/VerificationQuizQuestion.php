@@ -11,7 +11,7 @@ class VerificationQuizQuestion extends Model
     use HasFactory;
 
     protected $fillable = [
-        'career_id', 'question_text', 'code_snippet', 'options',
+        'career_id', 'skill_id', 'question_text', 'code_snippet', 'options',
         'correct_option_index', 'explanation', 'is_warmup', 'order',
     ];
 
@@ -27,10 +27,15 @@ class VerificationQuizQuestion extends Model
     }
 
     /**
-     * Representasi soal TANPA jawaban benar — WAJIB dipakai untuk
-     * response API yang dikirim ke client sebelum user menjawab,
-     * supaya kunci jawaban nggak bocor lewat Network tab browser.
+     * Skill spesifik yang divalidasi soal ini. Nullable — soal lama/umum
+     * yang belum ditag dianggap career-wide, tidak mengoreksi radar chart
+     * skill manapun secara spesifik.
      */
+    public function skill(): BelongsTo
+    {
+        return $this->belongsTo(CareerSkill::class, 'skill_id');
+    }
+
     public function toSafeArray(): array
     {
         return [

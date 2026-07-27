@@ -4,13 +4,16 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Career;
+use App\Models\CareerSkill;
 use App\Models\ExperienceChecklistItem;
 use App\Models\ScenarioConfidenceItem;
 use App\Models\UserExperienceChecklist;
+use App\Models\UserSkillAssessment;
 use App\Models\UserVerificationAnswer;
 use App\Models\UserScenarioConfidence;
 use App\Models\VerificationQuizQuestion;
 use App\Models\VerificationQuizAttempt;
+use App\Services\SkillRecommendationCacheService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -61,7 +64,6 @@ class SelfAssessmentController extends Controller
         $warmupAlreadyAnswered = null;
 
         if ($warmupQuestion) {
-            // Catat sesi warmup (agar tab switch bisa dilacak)
             $warmupAttempt = VerificationQuizAttempt::firstOrCreate(
                 ['user_id' => $userId, 'career_id' => $career->id, 'is_warmup' => true],
                 ['status' => 'in_progress', 'started_at' => now()]
@@ -111,13 +113,19 @@ class SelfAssessmentController extends Controller
 
         $userId = $request->user()->id;
 
-        DB::transaction(function () use ($validated, $userId) {
+        DB::transaction(function () use ($validated, $userId, $request) {
             foreach ($validated['items'] as $item) {
                 UserExperienceChecklist::updateOrCreate(
                     ['user_id' => $userId, 'experience_checklist_item_id' => $item['id']],
                     ['checked' => $item['checked']]
                 );
             }
+
+            // Tandai eksplisit bahwa user SUDAH submit step 2, terlepas dari
+            // apakah dia mencentang sesuatu atau tidak. Ini mencegah bug di
+            // mana "belum pernah isi" ketuker sama "isi tapi kosong semua",
+            // sama seperti pola yang sudah dibenahi di VerificationQuizAttempt.
+            $request->user()->update(['experience_checklist_submitted_at' => now()]);
         });
 
         return response()->json(['message' => 'Checklist tersimpan.']);
@@ -145,6 +153,10 @@ class SelfAssessmentController extends Controller
             }
         });
 
+        // confidence berubah → rekomendasi skill map yang di-cache sudah tidak relevan
+        app(SkillRecommendationCacheService::class)
+            ->invalidate($userId, $request->user()->career_goal_id);
+
         return response()->json(['message' => 'Confidence level tersimpan.']);
     }
 
@@ -155,7 +167,6 @@ class SelfAssessmentController extends Controller
     {
         $userId = $request->user()->id;
 
-        // Catat sesi kuis utama
         $attempt = VerificationQuizAttempt::firstOrCreate(
             ['user_id' => $userId, 'career_id' => $career->id, 'is_warmup' => false],
             ['status' => 'in_progress', 'started_at' => now()]
@@ -214,7 +225,6 @@ class SelfAssessmentController extends Controller
             ]
         );
 
-        // Jika ini soal warmup (1 soal), langsung selesaikan attempt-nya
         if ($question->is_warmup) {
             $attempt->update([
                 'status' => 'completed',
@@ -249,7 +259,6 @@ class SelfAssessmentController extends Controller
         $correctCount = $answers->where('is_correct', true)->count();
         $scorePercentage = $totalQuestions > 0 ? round(($correctCount / $totalQuestions) * 100) : 0;
 
-        // Kunci status attempt menjadi completed di akhir kuis
         $attempt = VerificationQuizAttempt::where('user_id', $userId)
             ->where('career_id', $career->id)
             ->where('is_warmup', false)
@@ -261,6 +270,40 @@ class SelfAssessmentController extends Controller
                 'completed_at' => now(),
                 'score_percentage' => $scorePercentage,
             ]);
+
+            // quiz baru saja diselesaikan → rekomendasi skill map yang
+            // di-cache sudah tidak relevan
+            app(SkillRecommendationCacheService::class)
+                ->invalidate($userId, $career->id);
+        }
+
+        // Pastikan tahap 1 (rating skill) dan tahap 2 (checklist) juga sudah
+        // lengkap sebelum menandai seluruh assessment selesai — jangan cuma
+        // andalkan urutan halaman di frontend, karena endpoint ini bisa
+        // dipanggil langsung tanpa lewat tahap sebelumnya.
+        $careerSkillIds = CareerSkill::where('career_id', $career->id)->pluck('id');
+        $ratedSkillsCount = UserSkillAssessment::where('user_id', $userId)
+            ->whereIn('career_skill_id', $careerSkillIds)
+            ->count();
+
+        $checklistItemIds = ExperienceChecklistItem::where('career_id', $career->id)->pluck('id');
+
+        $stage1Complete = $careerSkillIds->isEmpty() || $ratedSkillsCount >= $careerSkillIds->count();
+
+        // FIX: sebelumnya pakai `$checkedItemsCount > 0`, yang keliru
+        // menganggap "checklist kosong semua (jujur tidak checked apapun)"
+        // sama dengan "belum pernah submit step 2". Sekarang pakai penanda
+        // eksplisit `experience_checklist_submitted_at`, sama seperti pola
+        // fix pada VerificationQuizAttempt::isCompleted().
+        $stage2Complete = $checklistItemIds->isEmpty()
+            || $request->user()->experience_checklist_submitted_at !== null;
+
+        $stage3Complete = $attempt?->isCompleted() ?? false;
+
+        $allStagesComplete = $stage1Complete && $stage2Complete && $stage3Complete;
+
+        if ($allStagesComplete && ! $request->user()->assessment_completed_at) {
+            $request->user()->update(['assessment_completed_at' => now()]);
         }
 
         return response()->json([
@@ -269,6 +312,7 @@ class SelfAssessmentController extends Controller
             'correct' => $correctCount,
             'score_percentage' => $scorePercentage,
             'is_completed' => $attempt?->isCompleted() ?? false,
+            'assessment_completed' => $allStagesComplete,
         ]);
     }
 
@@ -278,13 +322,13 @@ class SelfAssessmentController extends Controller
     public function logTabSwitch(Request $request, Career $career): JsonResponse
     {
         $isWarmup = (bool) $request->input('is_warmup', false);
-        
+
         VerificationQuizAttempt::where('user_id', $request->user()->id)
             ->where('career_id', $career->id)
             ->where('is_warmup', $isWarmup)
             ->where('status', 'in_progress')
             ->increment('tab_switch_count');
-        
+
         return response()->json([], 204);
     }
 }

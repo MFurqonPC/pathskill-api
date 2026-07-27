@@ -18,7 +18,7 @@ class LearningPathController extends Controller
     }
 
     /**
-     * POST /api/learning-path/recommend
+     * POST /api/learning-path/generate
      * Minta Groq merekomendasikan URUTAN modul yang sudah ada (manual/seeder)
      * berdasarkan skill gap user. TIDAK membuat modul/lesson/assignment baru.
      */
@@ -27,7 +27,23 @@ class LearningPathController extends Controller
         $user = $request->user();
 
         if (! $user->career_goal_id) {
-            return response()->json(['message' => 'User belum memilih career goal.'], 422);
+            return response()->json([
+                'message' => 'User belum memilih career goal.',
+                'reason' => 'no_career_goal',
+            ], 422);
+        }
+
+        // Gate: assessment 3-tahap (rating + checklist + quiz) harus lunas
+        // dulu. Konsisten dengan index()/show()/SkillMapController/
+        // DashboardController. Tanpa ini, endpoint bisa dipanggil langsung
+        // (skip index()) dan memicu Groq generate learning path untuk user
+        // yang assessment-nya belum lunas.
+        if (! $user->assessment_completed_at) {
+            return response()->json([
+                'message' => 'Selesaikan Skill Assessment terlebih dahulu.',
+                'reason' => 'not_assessed',
+                'career_goal_id' => $user->career_goal_id,
+            ], 422);
         }
 
         $career = $user->careerGoal;
@@ -99,7 +115,25 @@ class LearningPathController extends Controller
         $user = $request->user();
 
         if (! $user->career_goal_id) {
-            return response()->json(['message' => 'User belum memilih career goal.'], 422);
+            // `reason` dipakai frontend untuk menentukan CTA (Lengkapi Profil)
+            // tanpa mencocokkan teks `message`.
+            return response()->json([
+                'message' => 'User belum memilih career goal.',
+                'reason' => 'no_career_goal',
+            ], 422);
+        }
+
+        // Gate: assessment 3-tahap (rating + checklist + quiz) harus lunas
+        // dulu. Pakai `assessment_completed_at` sebagai satu-satunya sumber
+        // kebenaran (di-set oleh SelfAssessmentController::quizResult() saat
+        // ketiga tahap lengkap), konsisten dengan SkillMapController &
+        // DashboardController.
+        if (! $user->assessment_completed_at) {
+            return response()->json([
+                'message' => 'Selesaikan Skill Assessment terlebih dahulu.',
+                'reason' => 'not_assessed',
+                'career_goal_id' => $user->career_goal_id,
+            ], 422);
         }
 
         $modules = LearningModule::where('career_id', $user->career_goal_id)
@@ -147,8 +181,41 @@ class LearningPathController extends Controller
      * (dipakai di halaman "Advanced React Patterns" detail).
      */
     public function show(Request $request, LearningModule $module): JsonResponse
-{
-   $user = $request->user();
+    {
+        $user = $request->user();
+
+        if (! $user->career_goal_id) {
+            return response()->json([
+                'message' => 'User belum memilih career goal.',
+                'reason' => 'no_career_goal',
+            ], 422);
+        }
+
+        // Gate: konsisten dengan index()/recommend(). Tanpa ini, user yang
+        // belum menyelesaikan assessment tetap bisa mengakses detail modul
+        // (lessons + assignments) selama dia tahu/menebak {module} id-nya,
+        // karena route model binding di parameter tidak otomatis mem-filter
+        // berdasarkan status assessment user.
+        if (! $user->assessment_completed_at) {
+            return response()->json([
+                'message' => 'Selesaikan Skill Assessment terlebih dahulu.',
+                'reason' => 'not_assessed',
+                'career_goal_id' => $user->career_goal_id,
+            ], 422);
+        }
+
+        // Ownership check: modul harus milik career goal user ini. Tanpa
+        // ini, user A yang sudah lulus assessment untuk career X tetap bisa
+        // mengintip detail modul career Y milik user lain hanya dengan
+        // menebak/mengganti {module} id di URL — route model binding
+        // Laravel hanya memastikan modul-nya ADA, bukan bahwa modul itu
+        // relevan untuk user yang sedang login.
+        if ($module->career_id !== $user->career_goal_id) {
+            return response()->json([
+                'message' => 'Modul ini tidak tersedia untuk career goal kamu.',
+            ], 404);
+        }
+
         $module->load([
             'lessons.userProgress' => fn ($q) => $q->where('user_id', $user->id),
             'assignments.userProgress' => fn ($q) => $q->where('user_id', $user->id),
@@ -159,6 +226,7 @@ class LearningPathController extends Controller
             'id' => $module->id,
             'title' => $module->title,
             'description' => $module->description,
+            'learning_objectives' => $module->learning_objectives,
             'progress_percentage' => $module->userProgress->first()?->percentage ?? 0,
             'lessons' => $module->lessons->map(fn ($l) => [
                 'id' => $l->id,

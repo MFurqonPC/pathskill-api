@@ -38,6 +38,7 @@ class CareerController extends Controller
             'career_goal_id' => $career->id,
             'education_background' => $validated['education_background'] ?? null,
             'interest' => $validated['interest'] ?? null,
+            'profile_setup_completed_at' => now(), // ← tambahan
         ]);
 
         return response()->json([

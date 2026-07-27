@@ -19,10 +19,12 @@ class LearningModule extends Model
         'total_lessons',
         'total_assignments',
         'ai_generated',
+        'learning_objectives'
     ];
 
     protected $casts = [
         'ai_generated' => 'boolean',
+        'learning_objectives' => 'array',
     ];
 
     public function career(): BelongsTo

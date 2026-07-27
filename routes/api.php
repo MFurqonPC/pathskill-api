@@ -18,6 +18,8 @@ use Illuminate\Support\Facades\Route;
 // ==== PUBLIC ROUTES ====
 Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
+Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('/reset-password', [AuthController::class, 'resetPassword']);
 Route::post('/contact', [ContactMessageController::class, 'store']);
 
 // ==== PROTECTED ROUTES (butuh Bearer token dari Sanctum) ====
@@ -55,7 +57,7 @@ Route::middleware('auth:sanctum')->group(function () {
     Route::post('/learning-path/generate', [LearningPathController::class, 'recommend']);
     Route::get('/learning-path', [LearningPathController::class, 'index']);
     Route::get('/learning-path/{module}', [LearningPathController::class, 'show']);
-    Route::post('/learning-path/generate', [LearningPathController::class, 'recommend']);
+
     // Progress
     Route::post('/lessons/{lesson}/complete', [ProgressController::class, 'completeLesson']);
     // route baru

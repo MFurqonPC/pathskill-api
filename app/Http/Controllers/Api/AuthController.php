@@ -7,6 +7,8 @@ use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Hash;
+use Illuminate\Support\Facades\Password as PasswordFacade;
+use Illuminate\Support\Str;
 use Illuminate\Validation\Rules\Password;
 
 class AuthController extends Controller
@@ -64,5 +66,65 @@ class AuthController extends Controller
     public function me(Request $request): JsonResponse
     {
         return response()->json($request->user());
+    }
+
+    /**
+     * Kirim email berisi link reset password.
+     *
+     * Pesan respons SENGAJA dibuat sama baik email terdaftar maupun tidak
+     * (lihat return di bawah), supaya endpoint ini tidak bisa dipakai orang
+     * lain untuk mengecek email mana saja yang terdaftar di sistem
+     * (user enumeration). Jangan ubah jadi pesan yang beda-beda per kasus.
+     */
+    public function forgotPassword(Request $request): JsonResponse
+    {
+        $request->validate([
+            'email' => ['required', 'email'],
+        ]);
+
+        PasswordFacade::sendResetLink($request->only('email'));
+
+        return response()->json([
+            'message' => 'Jika email terdaftar, tautan reset password sudah dikirim.',
+        ]);
+    }
+
+    /**
+     * Reset password menggunakan token yang dikirim lewat email.
+     */
+    public function resetPassword(Request $request): JsonResponse
+    {
+        $validated = $request->validate([
+            'token' => ['required'],
+            'email' => ['required', 'email'],
+            'password' => ['required', 'confirmed', Password::min(8)],
+        ]);
+
+        $status = PasswordFacade::reset(
+            $validated,
+            function (User $user, string $password) {
+                $user->forceFill([
+                    'password' => Hash::make($password),
+                ])->setRememberToken(Str::random(60));
+
+                $user->save();
+
+                // Cabut semua token akses lama supaya sesi lama (misal di
+                // perangkat lain) otomatis ter-logout setelah password
+                // direset — praktik standar untuk mencegah akses tak sah
+                // memakai token yang bocor sebelum reset.
+                $user->tokens()->delete();
+            }
+        );
+
+        if ($status !== PasswordFacade::PASSWORD_RESET) {
+            return response()->json([
+                'message' => __($status),
+            ], 422);
+        }
+
+        return response()->json([
+            'message' => 'Password berhasil direset. Silakan login dengan password baru.',
+        ]);
     }
 }

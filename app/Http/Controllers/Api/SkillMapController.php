@@ -4,34 +4,36 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Career;
+use App\Models\SkillRecommendation;
 use App\Models\UserVerificationAnswer;
 use App\Models\UserScenarioConfidence;
 use App\Models\VerificationQuizQuestion;
+use App\Services\GroqService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class SkillMapController extends Controller
 {
     /**
-     * Bobot untuk blend "Tingkat Saat Ini". Self-rating tetap paling besar
-     * porsinya (paling granular, per-skill), scenario confidence dan quiz
-     * score jadi "koreksi" — misal user kepedean di self-rating tapi jawaban
-     * quiz-nya banyak salah, tingkat saat ini akan sedikit dikoreksi turun.
+     * Bobot komponen "current level" per skill. Self-rating dominan (50%)
+     * karena selalu tersedia (wajib di Step 1) dan paling granular.
+     * Confidence (20%) & quiz (30%) menguatkan/mengoreksi self-rating yang
+     * subjektif — HANYA berlaku untuk skill yang punya soal/skenario yang
+     * ditag secara spesifik ke skill tersebut.
      *
-     * Total harus 1.0. Kalau Step 2/3 belum diisi user, bobotnya otomatis
-     * dialihkan ke self-rating (lihat method blendCurrentLevel()).
+     * Kalau confidence/quiz untuk skill itu belum ditag, bobotnya
+     * di-redistribusi proporsional ke komponen yang tersedia (lihat
+     * blendSkillLevel()) — BUKAN dianggap 0 dan BUKAN dipinjam dari
+     * rata-rata career, supaya tidak menyesatkan skill lain yang memang
+     * belum divalidasi secara spesifik.
      */
     private const WEIGHT_SELF_RATING = 0.5;
     private const WEIGHT_CONFIDENCE = 0.2;
     private const WEIGHT_QUIZ = 0.3;
 
-    /**
-     * GET /api/skill-map
-     * Hitung "Your Skill Map": Tingkat Saat Ini (blend Step 1+2+3),
-     * Tingkat yang Diperlukan, Kesenjangan Keterampilan, plus data
-     * per-skill untuk radar chart (radar tetap murni dari Step 1,
-     * karena confidence & quiz sifatnya general, bukan per-skill).
-     */
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
@@ -39,12 +41,22 @@ class SkillMapController extends Controller
         if (! $user->career_goal_id) {
             return response()->json([
                 'message' => 'User belum memilih career goal.',
+                'reason' => 'no_career_goal',
+                'career_goal_id' => null,
+            ], 422);
+        }
+
+        if (! $user->assessment_completed_at) {
+            return response()->json([
+                'message' => 'Assessment untuk career ini belum diselesaikan.',
+                'reason' => 'not_assessed',
+                'career_goal_id' => $user->career_goal_id,
             ], 422);
         }
 
         $career = Career::findOrFail($user->career_goal_id);
 
-        // ==== STEP 1: Self-Rating per skill (existing) ====
+        // ==== STEP 1: Self-Rating per skill ====
         $skills = $career->skills()
             ->with(['assessments' => fn ($q) => $q->where('user_id', $user->id)])
             ->get();
@@ -54,51 +66,94 @@ class SkillMapController extends Controller
         if ($ratedSkills->isEmpty()) {
             return response()->json([
                 'message' => 'Belum ada skill yang dinilai untuk career ini.',
+                'reason' => 'not_assessed',
+                'career_goal_id' => $user->career_goal_id,
             ], 422);
         }
 
-        $selfRatingAvg = $ratedSkills->avg(fn ($skill) => $skill->assessments->first()->rating);
         $requiredLevel = round($ratedSkills->avg('industry_requirement'), 1);
 
-        // ==== STEP 2: Scenario-Based Confidence (opsional, mungkin belum diisi) ====
-        $confidenceAvg = UserScenarioConfidence::where('user_id', $user->id)
+        // ==== STEP 2: Scenario Confidence, dikelompokkan per skill_id ====
+        $confidenceBySkill = UserScenarioConfidence::where('user_id', $user->id)
             ->whereHas('scenarioConfidenceItem', fn ($q) => $q->where('career_id', $career->id))
-            ->avg('confidence_level'); // null kalau belum ada
+            ->with('scenarioConfidenceItem:id,skill_id')
+            ->get()
+            ->groupBy(fn ($c) => $c->scenarioConfidenceItem->skill_id)
+            ->map(fn ($group) => $group->avg('confidence_level'));
 
-        // ==== STEP 3: Skill Verification Quiz (opsional, mungkin belum diisi) ====
-        $quizQuestionIds = VerificationQuizQuestion::where('career_id', $career->id)
+        // ==== STEP 3: Quiz, dikelompokkan per skill_id ====
+        $quizQuestions = VerificationQuizQuestion::where('career_id', $career->id)
             ->where('is_warmup', false)
-            ->pluck('id');
+            ->get(['id', 'skill_id']);
 
         $quizAnswers = UserVerificationAnswer::where('user_id', $user->id)
-            ->whereIn('verification_quiz_question_id', $quizQuestionIds)
+            ->whereIn('verification_quiz_question_id', $quizQuestions->pluck('id'))
             ->get();
 
-        $quizScorePercentage = null;
-        $quizScoreOn5Scale = null;
-        if ($quizAnswers->isNotEmpty()) {
-            $correctCount = $quizAnswers->where('is_correct', true)->count();
-            $answeredCount = $quizAnswers->count();
-            $quizScorePercentage = round(($correctCount / $answeredCount) * 100);
-            $quizScoreOn5Scale = ($correctCount / $answeredCount) * 5; // konversi ke skala 1-5 biar sepadan sama rating skill
+        $questionSkillMap = $quizQuestions->pluck('skill_id', 'id');
+
+        $quizBySkill = $quizAnswers
+            ->groupBy(fn ($answer) => $questionSkillMap->get($answer->verification_quiz_question_id))
+            ->map(function ($group) {
+                $correct = $group->where('is_correct', true)->count();
+                $total = $group->count();
+                return $total > 0 ? ($correct / $total) * 5 : null;
+            });
+
+        // ==== Blend per skill + susun chart data ====
+        $chartData = [];
+        $blendedLevels = [];
+
+        foreach ($skills as $skill) {
+            $selfRating = $skill->assessments->first()?->rating;
+
+            if ($selfRating === null) {
+                $chartData[] = [
+                    'skill_name' => $skill->skill_name,
+                    'current' => null,
+                    'required' => $skill->industry_requirement,
+                    'is_rated' => false,
+                    'is_confidence_validated' => false,
+                    'is_quiz_validated' => false,
+                ];
+                continue;
+            }
+
+            $skillConfidence = $confidenceBySkill->get($skill->id);
+            $skillQuiz = $quizBySkill->get($skill->id);
+
+            $blended = $this->blendSkillLevel((float) $selfRating, $skillConfidence, $skillQuiz);
+            $blendedLevels[] = $blended;
+
+            $chartData[] = [
+                'skill_name' => $skill->skill_name,
+                'current' => round($blended, 1),
+                'required' => $skill->industry_requirement,
+                'is_rated' => true,
+                'is_confidence_validated' => $skillConfidence !== null,
+                'is_quiz_validated' => $skillQuiz !== null,
+            ];
         }
 
-        $currentLevel = round(
-            $this->blendCurrentLevel($selfRatingAvg, $confidenceAvg, $quizScoreOn5Scale),
-            1
-        );
-
+        $currentLevel = round(array_sum($blendedLevels) / count($blendedLevels), 1);
         $skillGap = round(max($requiredLevel - $currentLevel, 0), 1);
 
-        // radar chart TETAP murni dari Step 1 (per-skill), karena confidence
-        // & quiz sifatnya general/tidak terikat ke satu skill spesifik
-        $chartData = $skills->map(function ($skill) {
-            return [
-                'skill_name' => $skill->skill_name,
-                'current' => $skill->assessments->first()?->rating ?? 0,
-                'required' => $skill->industry_requirement,
-            ];
-        });
+        // Breakdown level career (murni informatif, transparansi ke user)
+        $selfRatingAvgRaw = $ratedSkills->avg(fn ($skill) => $skill->assessments->first()->rating);
+        $confidenceAvgRaw = UserScenarioConfidence::where('user_id', $user->id)
+            ->whereHas('scenarioConfidenceItem', fn ($q) => $q->where('career_id', $career->id))
+            ->avg('confidence_level');
+        $quizScorePercentageRaw = $quizAnswers->isNotEmpty()
+            ? round(($quizAnswers->where('is_correct', true)->count() / $quizAnswers->count()) * 100)
+            : null;
+
+        $recommendation = $this->buildRecommendation(
+            $career,
+            $ratedSkills,
+            $currentLevel,
+            $requiredLevel,
+            $user->id
+        );
 
         return response()->json([
             'career' => $career->only(['id', 'name', 'icon']),
@@ -106,27 +161,18 @@ class SkillMapController extends Controller
                 'current_level' => $currentLevel,
                 'required_level' => $requiredLevel,
                 'skill_gap' => $skillGap,
-                // transparansi: tunjukkan komponen pembentuk current_level,
-                // supaya user tahu ini bukan angka sihir dan bisa lihat
-                // sumber tiap komponennya
                 'breakdown' => [
-                    'self_rating' => round($selfRatingAvg, 1),
-                    'scenario_confidence' => $confidenceAvg !== null ? round($confidenceAvg, 1) : null,
-                    'quiz_score_percentage' => $quizScorePercentage,
+                    'self_rating' => round($selfRatingAvgRaw, 1),
+                    'scenario_confidence' => $confidenceAvgRaw !== null ? round($confidenceAvgRaw, 1) : null,
+                    'quiz_score_percentage' => $quizScorePercentageRaw,
                 ],
             ],
             'chart_data' => $chartData,
+            'recommendation' => $recommendation,
         ]);
     }
 
-    /**
-     * Blend 3 sumber data jadi 1 angka "Tingkat Saat Ini" (skala 1-5).
-     * Kalau confidence atau quiz belum diisi user, bobotnya dialihkan
-     * proporsional ke komponen yang tersedia (bukan dianggap 0) — supaya
-     * user yang baru sampai Step 1 tetap dapat Skill Map yang wajar,
-     * nggak dihukum karena belum sempat isi Step 2/3.
-     */
-    private function blendCurrentLevel(float $selfRating, ?float $confidence, ?float $quizScore): float
+    private function blendSkillLevel(float $selfRating, ?float $confidence, ?float $quizScore): float
     {
         $components = [
             'self_rating' => ['value' => $selfRating, 'weight' => self::WEIGHT_SELF_RATING],
@@ -148,5 +194,80 @@ class SkillMapController extends Controller
         }
 
         return $blended;
+    }
+
+    private function buildRecommendation(
+        Career $career,
+        \Illuminate\Support\Collection $ratedSkills,
+        float $currentLevel,
+        float $requiredLevel,
+        int $userId
+    ): ?array {
+        $cached = SkillRecommendation::where('user_id', $userId)
+            ->where('career_id', $career->id)
+            ->first();
+
+        if ($cached) {
+            return [
+                'foundation_summary' => $cached->foundation_summary,
+                'priority_areas' => $cached->priority_areas,
+                'priority_skill_names' => $cached->priority_skill_names,
+                'estimated_weeks' => $cached->estimated_weeks,
+            ];
+        }
+
+        $lockKey = "skill-recommendation-lock:{$userId}:{$career->id}";
+
+        return Cache::lock($lockKey, 15)->block(5, function () use (
+            $career, $ratedSkills, $currentLevel, $requiredLevel, $userId
+        ) {
+            $cached = SkillRecommendation::where('user_id', $userId)
+                ->where('career_id', $career->id)
+                ->first();
+
+            if ($cached) {
+                return [
+                    'foundation_summary' => $cached->foundation_summary,
+                    'priority_areas' => $cached->priority_areas,
+                    'priority_skill_names' => $cached->priority_skill_names,
+                    'estimated_weeks' => $cached->estimated_weeks,
+                ];
+            }
+
+            $skillGaps = $ratedSkills->map(fn ($skill) => [
+                'skill_name' => $skill->skill_name,
+                'current' => $skill->assessments->first()->rating,
+                'required' => $skill->industry_requirement,
+            ])->values()->all();
+
+            try {
+                $result = app(GroqService::class)->generateSkillRecommendation(
+                    $career,
+                    $skillGaps,
+                    $currentLevel,
+                    $requiredLevel
+                );
+
+                SkillRecommendation::updateOrCreate(
+                    ['user_id' => $userId, 'career_id' => $career->id],
+                    [
+                        'foundation_summary' => $result['foundation_summary'],
+                        'priority_areas' => $result['priority_areas'],
+                        'priority_skill_names' => $result['priority_skill_names'],
+                        'estimated_weeks' => $result['estimated_weeks'],
+                        'generated_at' => now(),
+                    ]
+                );
+
+                return $result;
+            } catch (Throwable $e) {
+                Log::warning('Gagal generate skill recommendation dari Groq', [
+                    'user_career_id' => $career->id,
+                    'error' => $e->getMessage(),
+                ]);
+
+                return null;
+            }
+        });
     }
 }

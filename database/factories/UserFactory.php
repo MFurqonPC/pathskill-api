@@ -42,4 +42,12 @@ class UserFactory extends Factory
             'email_verified_at' => null,
         ]);
     }
+
+    public function assessmentCompleted(): static
+    {
+        return $this->state(fn (array $attributes) => [
+            'experience_checklist_submitted_at' => now(),
+            'assessment_completed_at' => now(),
+    ]);
+}
 }
