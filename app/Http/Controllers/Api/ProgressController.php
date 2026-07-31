@@ -7,20 +7,19 @@ use App\Models\Assignment;
 use App\Models\Lesson;
 use App\Models\UserAssignmentProgress;
 use App\Models\UserLessonProgress;
-use App\Models\UserModuleProgress;
+use App\Services\ModuleProgressService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 
 class ProgressController extends Controller
 {
+    public function __construct(private ModuleProgressService $moduleProgress) {}
+
     /**
      * POST /api/lessons/{lesson}/complete
-     * Tandai 1 lesson selesai. Idempotent — kalau sudah pernah ditandai
-     * selesai sebelumnya, tidak akan menambah persentase modul dua kali.
-     * Persentase modul dihitung ulang dari total lesson yang benar-benar
-     * completed (bukan sekadar increment), jadi akurat walau lesson
-     * di-refresh/diklik berkali-kali atau di-load ulang.
+     * Persentase modul sekarang dihitung via ModuleProgressService
+     * (gabungan lesson + assignment successful), bukan lesson-only lagi.
      */
     public function completeLesson(Request $request, Lesson $lesson): JsonResponse
     {
@@ -32,39 +31,27 @@ class ProgressController extends Controller
             ['completed' => true, 'completed_at' => now()]
         );
 
-        $completedCount = UserLessonProgress::where('user_id', $user->id)
+        $progress = $this->moduleProgress->recalculate($user, $module);
+
+        $completedLessons = UserLessonProgress::where('user_id', $user->id)
             ->whereIn('lesson_id', $module->lessons()->pluck('id'))
             ->where('completed', true)
             ->count();
 
-        $percentage = $module->total_lessons > 0
-            ? (int) round(($completedCount / $module->total_lessons) * 100)
-            : 0;
-
-        $progress = UserModuleProgress::updateOrCreate(
-            ['user_id' => $user->id, 'learning_module_id' => $module->id],
-            [
-                'percentage' => $percentage,
-                'status' => $percentage >= 100 ? 'completed' : ($percentage > 0 ? 'in_progress' : 'not_started'),
-            ]
-        );
-
         return response()->json([
             'lesson_completed' => true,
-            'module_percentage' => $percentage,
+            'module_percentage' => $progress->percentage,
             'module_status' => $progress->status,
-            'lessons_completed' => $completedCount,
+            'lessons_completed' => $completedLessons,
             'total_lessons' => $module->total_lessons,
         ]);
     }
 
     /**
      * POST /api/assignments/{assignment}/submit
-     * Upload file assignment asli (multipart/form-data, field: "file")
-     * dan tandai status jadi 'submitted'.
-     *
-     * Catatan: pakai disk 'public' — jalankan `php artisan storage:link`
-     * sekali di server supaya file bisa diakses via URL publik.
+     * Tidak diubah — status masih 'submitted', BELUM ikut hitungan
+     * module percentage (baru dihitung setelah mentor review jadi
+     * 'successful', lihat AssignmentReviewController::store()).
      */
     public function submitAssignment(Request $request, Assignment $assignment): JsonResponse
     {
@@ -78,7 +65,6 @@ class ProgressController extends Controller
             'file.mimes' => 'Format file harus pdf, doc, docx, zip, jpg, jpeg, atau png.',
         ]);
 
-        // hapus file lama kalau user submit ulang (resubmit)
         $existing = UserAssignmentProgress::where('user_id', $user->id)
             ->where('assignment_id', $assignment->id)
             ->first();

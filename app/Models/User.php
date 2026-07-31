@@ -21,6 +21,12 @@ class User extends Authenticatable
     /** @use HasFactory<UserFactory> */
     use HasApiTokens, HasFactory, Notifiable;
 
+    private const PLAN_LEVELS = [
+        'free' => 0,
+        'pro' => 1,
+        'career_mentor' => 2,
+    ];
+
     protected $fillable = [
         'name',
         'email',
@@ -31,6 +37,10 @@ class User extends Authenticatable
         'career_goal_id',
         'assessment_completed_at',
         'experience_checklist_submitted_at',
+        // --- role & plan ---
+        'role',
+        'plan',
+        'plan_expires_at',
     ];
 
     protected $hidden = [
@@ -50,14 +60,38 @@ class User extends Authenticatable
             'password' => 'hashed',
             'assessment_completed_at' => 'datetime',
             'experience_checklist_submitted_at' => 'datetime',
+            'plan_expires_at' => 'datetime',
         ];
     }
 
-     public function careerGoal(): BelongsTo
+    public function isAdmin(): bool
+    {
+        return $this->role === 'admin';
+    }
+
+    public function hasPlanAtLeast(string $requiredPlan): bool
+    {
+        $userLevel = self::PLAN_LEVELS[$this->plan] ?? 0;
+
+        // Kalau plan berbayar sudah expired, perlakukan sebagai free —
+        // jangan biarkan orang yang lupa bayar tetap dapat akses cuma
+        // karena kolom `plan` di DB belum di-reset manual.
+        $isExpired = $this->plan !== 'free'
+            && $this->plan_expires_at !== null
+            && $this->plan_expires_at->isPast();
+
+        if ($isExpired) {
+            $userLevel = self::PLAN_LEVELS['free'];
+        }
+
+        return $userLevel >= (self::PLAN_LEVELS[$requiredPlan] ?? 0);
+    }
+
+    public function careerGoal(): BelongsTo
     {
         return $this->belongsTo(Career::class, 'career_goal_id');
     }
- 
+
     public function skillAssessments(): HasMany
     {
         return $this->hasMany(UserSkillAssessment::class);

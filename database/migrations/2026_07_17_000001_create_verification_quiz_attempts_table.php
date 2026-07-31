@@ -1,4 +1,3 @@
-// database/migrations/2026_07_17_000001_create_verification_quiz_attempts_table.php
 <?php
 
 use Illuminate\Database\Migrations\Migration;

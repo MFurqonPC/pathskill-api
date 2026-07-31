@@ -15,6 +15,10 @@ class CareerSeeder extends Seeder
      * 3. UI/UX Designer
      * 4. DevOps Engineer
      * 5. Data Analyst
+     *
+     * Idempotent: pakai updateOrCreate berdasarkan `name`, jadi aman
+     * dijalankan berkali-kali (baik lewat --class=CareerSeeder maupun
+     * db:seed penuh) tanpa membuat career/career_skill duplikat.
      */
     public function run(): void
     {
@@ -110,17 +114,30 @@ class CareerSeeder extends Seeder
         foreach ($careers as $careerData) {
             $skills = $careerData['skills'];
             unset($careerData['skills']);
+            $name = $careerData['name'];
 
-            $career = Career::create($careerData);
+            // updateOrCreate berdasarkan `name` — re-run seeder ini tidak
+            // akan membuat career duplikat lagi, cuma update kolomnya kalau
+            // ada perubahan (icon/description/order).
+            $career = Career::updateOrCreate(
+                ['name' => $name],
+                $careerData
+            );
 
             foreach ($skills as $index => $skill) {
-                CareerSkill::create([
-                    'career_id' => $career->id,
-                    'skill_name' => $skill['skill_name'],
-                    'category' => $skill['category'],
-                    'industry_requirement' => $skill['industry_requirement'],
-                    'order' => $index + 1,
-                ]);
+                // updateOrCreate berdasarkan (career_id, skill_name), supaya
+                // re-run juga tidak menduplikasi career_skills.
+                CareerSkill::updateOrCreate(
+                    [
+                        'career_id' => $career->id,
+                        'skill_name' => $skill['skill_name'],
+                    ],
+                    [
+                        'category' => $skill['category'],
+                        'industry_requirement' => $skill['industry_requirement'],
+                        'order' => $index + 1,
+                    ]
+                );
             }
         }
     }

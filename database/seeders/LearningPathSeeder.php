@@ -8,11 +8,7 @@ use Illuminate\Database\Seeder;
 
 class LearningPathSeeder extends Seeder
 {
-    /**
-     * Seed contoh learning path untuk "Full Stack Developer" saja,
-     * sesuai isi prototype (5 modul). Career lain akan digenerate
-     * oleh AI (Groq) nanti di fitur Learning Path.
-     */
+    
     public function run(): void
     {
         $career = Career::where('name', 'Full Stack Developer')->first();
@@ -320,56 +316,68 @@ class LearningPathSeeder extends Seeder
         }
     }
     private function seedModules($career, array $modules): void
-    {
-        foreach ($modules as $index => $moduleData) {
+{
+    foreach ($modules as $index => $moduleData) {
 
-            if (!isset($moduleData['lessons'])) {
-                dd($career->name, $index, $moduleData);
-            }
+        if (!isset($moduleData['lessons'])) {
+            dd($career->name, $index, $moduleData);
+        }
 
-            $lessons = $moduleData['lessons'];
-            $assignments = $moduleData['assignments'] ?? [];
+        $lessons = $moduleData['lessons'];
+        $assignments = $moduleData['assignments'] ?? [];
 
-            $module = LearningModule::create([
+        // updateOrCreate berdasarkan (career_id, title) — idempotent
+        $module = LearningModule::updateOrCreate(
+            [
                 'career_id' => $career->id,
                 'title' => $moduleData['title'],
+            ],
+            [
                 'description' => $moduleData['description'],
                 'order' => $moduleData['order'],
                 'total_lessons' => count($lessons),
                 'total_assignments' => count($assignments),
-                'ai_generated' => true, // ditandai AI-generated sesuai prototype (badge "AI")
-            ]);
+                'ai_generated' => true,
+            ]
+        );
 
-            foreach ($lessons as $index => $lesson) {
-                // Dukung 2 format: array asosiatif baru (title/explanation/example/function_context),
-                // atau string biasa (format lama)
-                $lessonTitle = is_array($lesson) ? $lesson['title'] : $lesson;
+        foreach ($lessons as $index => $lesson) {
+            $lessonTitle = is_array($lesson) ? $lesson['title'] : $lesson;
+            $fullLessonTitle = "Lesson " . ($index + 1) . ": {$lessonTitle}";
 
-                $module->lessons()->create([
-                    'title' => "Lesson " . ($index + 1) . ": {$lessonTitle}",
-                    'type' => 'video',
+            // updateOrCreate berdasarkan (learning_module_id, title) — idempotent
+            $module->lessons()->updateOrCreate(
+                ['title' => $fullLessonTitle],
+                [
+                    'type' => 'reading',
                     'duration_minutes' => 15,
                     'order' => $index + 1,
                     'explanation' => is_array($lesson) ? ($lesson['explanation'] ?? null) : null,
                     'example' => is_array($lesson) ? ($lesson['example'] ?? null) : null,
                     'function_context' => is_array($lesson) ? ($lesson['function_context'] ?? null) : null,
-                ]);
-            }
+                ]
+            );
+        }
 
-            foreach ($assignments as $index => $title) {
-                $module->assignments()->create([
-                    'title' => 'Assignment ' . ($index + 1) . ": {$title}",
+        foreach ($assignments as $index => $title) {
+            $fullTitle = 'Assignment ' . ($index + 1) . ": {$title}";
+
+            //  updateOrCreate berdasarkan (learning_module_id, title) — idempotent
+            $module->assignments()->updateOrCreate(
+                ['title' => $fullTitle],
+                [
                     'description' => 'Complete a practical ' . strtolower($moduleData['title']) . ' project',
                     'due_date' => now()->addWeeks(($moduleData['order'] - 1) * 2 + $index + 1),
                     'order' => $index + 1,
-                ]);
-            }
+                ]
+            );
         }
     }
+}
 
     /**
      * Data 7 materi untuk career Backend Developer.
-     * TANPA assignment (sesuai permintaan) — cuma murni materi belajar.
+     * 
      */
     private function backendModules(): array
     {

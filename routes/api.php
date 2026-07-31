@@ -1,11 +1,13 @@
 <?php
 
+use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CareerController;
 use App\Http\Controllers\Api\ContactMessageController;
 use App\Http\Controllers\Api\DashboardController;
 use App\Http\Controllers\Api\LearningPathController;
 use App\Http\Controllers\Api\AssignmentController;
+use App\Http\Controllers\Api\AssignmentReviewController;
 use App\Http\Controllers\Api\CodingExerciseController;
 use App\Http\Controllers\Api\MiniProjectController;
 use App\Http\Controllers\Api\ProgressController;
@@ -20,6 +22,10 @@ Route::post('/register', [AuthController::class, 'register']);
 Route::post('/login', [AuthController::class, 'login']);
 Route::post('/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('/reset-password', [AuthController::class, 'resetPassword']);
+// TANPA middleware auth:sanctum dengan sengaja — endpoint ini justru dipakai
+// SETELAH access token expired, diautentikasi lewat refresh_token cookie,
+// bukan Bearer token.
+Route::post('/refresh', [AuthController::class, 'refresh']);
 Route::post('/contact', [ContactMessageController::class, 'store']);
 
 // ==== PROTECTED ROUTES (butuh Bearer token dari Sanctum) ====
@@ -53,23 +59,31 @@ Route::middleware('auth:sanctum')->group(function () {
     // Dashboard
     Route::get('/dashboard', [DashboardController::class, 'index']);
 
-    // Learning Path (AI-generated via Groq)
-    Route::post('/learning-path/generate', [LearningPathController::class, 'recommend']);
-    Route::get('/learning-path', [LearningPathController::class, 'index']);
-    Route::get('/learning-path/{module}', [LearningPathController::class, 'show']);
+    Route::middleware('plan:pro')->group(function () {
+        // Assignment & Learning Path
+        Route::get('/assignments/{assignment}', [AssignmentController::class, 'show']);
+        Route::post('/assignments/{assignment}/submit', [ProgressController::class, 'submitAssignment']);
+        Route::get('/assignments/{assignment}/quiz', [QuizController::class, 'show']);
+        Route::post('/quiz-questions/{question}/answer', [QuizController::class, 'answer']);
+        Route::get('/assignments/{assignment}/coding-exercise', [CodingExerciseController::class, 'show']);
+        Route::post('/coding-exercises/{codingExercise}/submit', [CodingExerciseController::class, 'submit']);
+        Route::get('/assignments/{assignment}/mini-project', [MiniProjectController::class, 'show']);
+        Route::post('/lessons/{lesson}/complete', [ProgressController::class, 'completeLesson']);
 
-    // Progress
-    Route::post('/lessons/{lesson}/complete', [ProgressController::class, 'completeLesson']);
-    // route baru
-    Route::get('/assignments/{assignment}', [AssignmentController::class, 'show']);
-    // route lama tetap
-    Route::post('/assignments/{assignment}/submit', [ProgressController::class, 'submitAssignment']);
+        Route::post('/learning-path/generate', [LearningPathController::class, 'recommend']);
+        Route::get('/learning-path', [LearningPathController::class, 'index']);
+        Route::get('/learning-path/{module}', [LearningPathController::class, 'show']);
+    });
 
-    Route::get('/assignments/{assignment}/quiz', [QuizController::class, 'show']);
-    Route::post('/quiz-questions/{question}/answer', [QuizController::class, 'answer']);
+    // AssignmentReviewController dipakai mentor untuk mereview tugas siswa,
+    // bukan siswa mengerjakan tugas — tidak relevan dengan plan siswa,
+    // jadi sengaja tetap di luar grup plan:pro di atas.
+    Route::get('/assignments/{assignment}/review', [AssignmentReviewController::class, 'show']);
+    Route::post('/assignments/{assignment}/review', [AssignmentReviewController::class, 'store'])
+        ->middleware('role:mentor');
 
-    Route::get('/assignments/{assignment}/coding-exercise', [CodingExerciseController::class, 'show']);
-    Route::post('/coding-exercises/{codingExercise}/submit', [CodingExerciseController::class, 'submit']);
-
-    Route::get('/assignments/{assignment}/mini-project', [MiniProjectController::class, 'show']);
+Route::middleware('role:admin')->prefix('admin')->group(function () {
+    Route::get('/users/search', [AdminUserController::class, 'search']);
+    Route::post('/users/{user}/activate-plan', [AdminUserController::class, 'activatePlan']);
+    });
 });

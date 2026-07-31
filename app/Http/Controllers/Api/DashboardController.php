@@ -40,6 +40,13 @@ class DashboardController extends Controller
             ], 422);
         }
 
+        // Learning Path (detail modul + assignment) adalah fitur Pro+.
+        // Statistik agregat (total_modules, pending_assignments) tetap
+        // ditampilkan buat free user sebagai pemicu upgrade, tapi detail
+        // modul & daftar assignment yang bisa diklik disembunyikan supaya
+        // tidak ada link mati ke halaman yang sekarang 403 buat mereka.
+        $hasLearningPathAccess = $user->hasPlanAtLeast('pro');
+
         $modules = LearningModule::where('career_id', $user->career_goal_id)
             ->orderBy('order')
             ->with(['assignments', 'userProgress' => fn ($q) => $q->where('user_id', $user->id)])
@@ -102,13 +109,15 @@ class DashboardController extends Controller
             ? max((int) ceil(now()->diffInDays($latestPendingDueDate, false) / 7), 0)
             : 0;
 
-        $activeModules = $modules->take(3)->map(fn ($m) => [
-            'id' => $m->id,
-            'title' => $m->title,
-            'total_lessons' => $m->total_lessons,
-            'total_assignments' => $m->total_assignments,
-            'ai_generated' => $m->ai_generated,
-        ]);
+        $activeModules = $hasLearningPathAccess
+            ? $modules->take(3)->map(fn ($m) => [
+                'id' => $m->id,
+                'title' => $m->title,
+                'total_lessons' => $m->total_lessons,
+                'total_assignments' => $m->total_assignments,
+                'ai_generated' => $m->ai_generated,
+            ])
+            : collect();
 
         return response()->json([
             'user' => [
@@ -125,12 +134,15 @@ class DashboardController extends Controller
                 'weeks_remaining' => $weeksRemaining,
             ],
             'active_learning_path' => [
+                'locked' => ! $hasLearningPathAccess,
                 'modules_completed' => $completedModules,
                 'total_modules' => $totalModules,
                 'progress_percentage' => $overallProgress,
                 'modules' => $activeModules,
             ],
-            'assignments_to_complete' => $assignmentList,
+            // Kosongkan supaya tidak ada link mati ke /learning-path/{module}/
+            // assignments/{id} — halaman tujuannya sekarang 403 buat free user.
+            'assignments_to_complete' => $hasLearningPathAccess ? $assignmentList : [],
         ]);
     }
 }

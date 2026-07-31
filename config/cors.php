@@ -2,35 +2,18 @@
 
 return [
 
-    /*
-    |--------------------------------------------------------------------------
-    | Cross-Origin Resource Sharing (CORS) Configuration
-    |--------------------------------------------------------------------------
-    |
-    | Path yang diizinkan diakses cross-origin. 'api/*' menutupi semua
-    | endpoint kita (routes/api.php), 'sanctum/csrf-cookie' dibiarkan
-    | ada meskipun kita pakai Bearer token (bukan cookie-based auth),
-    | supaya tidak error kalau suatu saat butuh SPA cookie auth juga.
-    |
-    */
-    'paths' => ['api/*', 'sanctum/csrf-cookie'],
+    'paths' => ['api/*'],
 
     'allowed_methods' => ['*'],
 
     /*
     |--------------------------------------------------------------------------
-    | Origin frontend yang diizinkan
+    | PENTING: karena supports_credentials = true, ini TIDAK BOLEH '*'.
+    | Harus persis URL frontend (protokol + host + port).
     |--------------------------------------------------------------------------
-    |
-    | GANTI/TAMBAH sesuai domain frontend kamu. Untuk development,
-    | Next.js default jalan di localhost:3000. Untuk production nanti
-    | (setelah aplikasi stabil), tambahkan domain aslinya di sini —
-    | JANGAN pakai '*' kalau supports_credentials true.
-    |
     */
     'allowed_origins' => [
-        'http://localhost:3000',
-        'http://127.0.0.1:3000',
+        env('FRONTEND_URL', 'http://localhost:3000'),
     ],
 
     'allowed_origins_patterns' => [],
@@ -43,15 +26,11 @@ return [
 
     /*
     |--------------------------------------------------------------------------
-    | Supports Credentials
+    | HARUS true — cuma refresh_token cookie yang lewat sini, tapi browser
+    | butuh flag ini true di request DAN response supaya cookie httpOnly
+    | boleh dikirim/diterima lintas origin (localhost:3000 <-> :8000).
     |--------------------------------------------------------------------------
-    |
-    | FALSE karena kita pakai Bearer token di header Authorization
-    | (lihat lib/api.ts di frontend), BUKAN cookie-based session auth.
-    | Kalau nanti pindah ke cookie-based Sanctum SPA auth, baru ubah
-    | ini jadi true DAN set SANCTUM_STATEFUL_DOMAINS di .env.
-    |
     */
-    'supports_credentials' => false,
+    'supports_credentials' => true,
 
 ];
